@@ -34,7 +34,6 @@ from AppKit import (  # noqa: E402
 from Quartz import CGContextGetClipBoundingBox  # noqa: E402
 
 import context_board  # noqa: E402
-import context_designspace  # noqa: E402
 
 try:
     import context_smart_ruler_bridge as _smart_ruler_bridge  # noqa: E402
@@ -434,7 +433,7 @@ class AZContextReporter(ReporterPlugin):
         # used to cap this too, and at "2" a three-master width line showed one
         # neighbour and silently dropped Extended (Hugo, 2026-10-10).
         left_indices: list[int] = []
-        if axis in context_designspace.SLANT_AXIS_TAGS:
+        if axis in context_board.SLANT_AXIS_TAGS:
             # Slant/italic: always show the upright<->italic counterpart(s) on
             # the right, never the left, whichever master is current.
             right_indices = [i for i in range(len(ordered)) if i != current_index]
