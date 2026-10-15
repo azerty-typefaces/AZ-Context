@@ -2,7 +2,7 @@
 
 A vanilla view hosted in an NSViewController and handed to Glyphs via the app
 delegate's ``addViewToPreferences_`` (the same hook AZ-Colorflow uses). Controls
-write straight to ``Glyphs.defaults`` (keys live in ``context_prefs``) and
+write straight to ``Glyphs.defaults`` (keys live in ``context_board``) and
 invalidate the live edit view; the reporter reads those defaults every frame,
 so no notification plumbing is needed.
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import traceback
 
-import context_prefs
+import context_board
 
 try:
     import objc
@@ -133,12 +133,8 @@ if _AVAILABLE:
 
             group.siblingsHeader = vanilla.TextBox((margin, 12, inner, 18), "Siblings")
 
-            fill = context_prefs.decode_color(
-                Glyphs.defaults[context_prefs.FILL_COLOR_KEY], context_prefs.DEFAULT_FILL_RGBA
-            )
-            stroke = context_prefs.decode_color(
-                Glyphs.defaults[context_prefs.STROKE_COLOR_KEY], context_prefs.DEFAULT_STROKE_RGBA
-            )
+            fill = context_board.color(context_board.FILL_COLOR_KEY)
+            stroke = context_board.color(context_board.STROKE_COLOR_KEY)
 
             group.outlineLabel = vanilla.TextBox((margin, 42, 140, 18), "Outline")
             group.outlineWell = vanilla.ColorWell(
@@ -151,18 +147,13 @@ if _AVAILABLE:
 
             self._targets = []
             label_w = inner - _SWITCH_COLUMN
-            show_guides = context_prefs.decode_bool(
-                Glyphs.defaults[context_prefs.SHOW_GUIDES_KEY], context_prefs.DEFAULT_SHOW_GUIDES
-            )
+            show_guides = bool(Glyphs.defaults[context_board.SHOW_GUIDES_KEY])
             group.guidesLabel = vanilla.TextBox((margin, 102, label_w, 18), "Show metric guides")
             self._guides_switch = self._add_switch(group, 102, show_guides, self._guides_changed)
 
             group.rulerHeader = vanilla.TextBox((margin, 134, inner, 18), "Smart Ruler")
             installed = _smart_ruler_installed()
-            show_meas = context_prefs.decode_bool(
-                Glyphs.defaults[context_prefs.SHOW_MEASUREMENTS_KEY],
-                context_prefs.DEFAULT_SHOW_MEASUREMENTS,
-            )
+            show_meas = bool(Glyphs.defaults[context_board.SHOW_MEASUREMENTS_KEY])
             title = (
                 "Show measurements on siblings"
                 if installed
@@ -233,26 +224,22 @@ if _AVAILABLE:
 
         @objc.python_method
         def _outline_changed(self, sender: object) -> None:
-            Glyphs.defaults[context_prefs.STROKE_COLOR_KEY] = context_prefs.encode_color(
-                _rgba(sender.get())
-            )
+            context_board.set_color(context_board.STROKE_COLOR_KEY, _rgba(sender.get()))
             self._redraw()
 
         @objc.python_method
         def _fill_changed(self, sender: object) -> None:
-            Glyphs.defaults[context_prefs.FILL_COLOR_KEY] = context_prefs.encode_color(
-                _rgba(sender.get())
-            )
+            context_board.set_color(context_board.FILL_COLOR_KEY, _rgba(sender.get()))
             self._redraw()
 
         @objc.python_method
         def _guides_changed(self, sender: object) -> None:
-            Glyphs.defaults[context_prefs.SHOW_GUIDES_KEY] = bool(sender.state())
+            Glyphs.defaults[context_board.SHOW_GUIDES_KEY] = bool(sender.state())
             self._redraw()
 
         @objc.python_method
         def _measurements_changed(self, sender: object) -> None:
-            Glyphs.defaults[context_prefs.SHOW_MEASUREMENTS_KEY] = bool(sender.state())
+            Glyphs.defaults[context_board.SHOW_MEASUREMENTS_KEY] = bool(sender.state())
             self._redraw()
 
     class AZContextPreferencesController(NSViewController):

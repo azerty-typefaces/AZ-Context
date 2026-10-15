@@ -27,6 +27,36 @@ BOARD_KEY = "com.hugojourdan.AZContext.board"
 SIDES: tuple[str, ...] = ("left", "right")
 VALID_MODES: tuple[str, ...] = ("glyphs", "axis")
 
+# Display settings, written by the Settings pane, read by the reporter.
+FILL_COLOR_KEY = "com.hugojourdan.AZContext.fillColor"
+STROKE_COLOR_KEY = "com.hugojourdan.AZContext.strokeColor"
+SHOW_GUIDES_KEY = "com.hugojourdan.AZContext.showGuides"
+SHOW_MEASUREMENTS_KEY = "com.hugojourdan.AZContext.showMeasurements"
+_DEFAULT_COLORS = {
+    FILL_COLOR_KEY: (0.55, 0.35, 0.85, 0.14),
+    STROKE_COLOR_KEY: (0.42, 0.22, 0.70, 0.55),
+}
+# Colours are JSON "[r, g, b, a]" strings, like the board. Registered defaults
+# answer Glyphs.defaults[key] until the user changes a setting.
+for _key, _rgba in _DEFAULT_COLORS.items():
+    Glyphs.registerDefault(_key, json.dumps(_rgba))
+Glyphs.registerDefault(SHOW_GUIDES_KEY, False)
+Glyphs.registerDefault(SHOW_MEASUREMENTS_KEY, True)
+
+
+def color(key: str) -> tuple[float, ...]:
+    """The (r, g, b, a) colour stored under ``key``; the default if malformed."""
+    try:
+        rgba = tuple(float(value) for value in json.loads(Glyphs.defaults[key]))
+    except (TypeError, ValueError):
+        rgba = ()
+    return rgba if len(rgba) == 4 else _DEFAULT_COLORS[key]
+
+
+def set_color(key: str, rgba: tuple[float, ...]) -> None:
+    Glyphs.defaults[key] = json.dumps([float(value) for value in rgba])
+
+
 _DESIGNSPACE_TTL = 2.0  # seconds; Font Info master edits show on the board <=2 s late
 _designspace_cache: tuple | None = None  # (font key, expiry, result)
 _SHAPE_TTL = 2.0  # seconds; feature-code edits reach the siblings <=2 s late

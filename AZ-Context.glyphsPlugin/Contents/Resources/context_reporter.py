@@ -35,7 +35,6 @@ from Quartz import CGContextGetClipBoundingBox  # noqa: E402
 
 import context_board  # noqa: E402
 import context_designspace  # noqa: E402
-import context_prefs  # noqa: E402
 
 try:
     import context_smart_ruler_bridge as _smart_ruler_bridge  # noqa: E402
@@ -43,8 +42,6 @@ except Exception:
     _smart_ruler_bridge = None
 
 GAP = 60.0
-# Faint silhouette fill/stroke default; user-overridable via Settings (the live
-# values come from context_prefs / Glyphs.defaults, these are the fallbacks).
 # Solid silhouette fill used while the Hand tool is active (preview-like).
 PREVIEW_FILL_RGBA = (0.0, 0.0, 0.0, 1.0)
 # On-screen points; every draw divides by the view scale so strokes stay a fixed
@@ -295,10 +292,9 @@ class AZContextReporter(ReporterPlugin):
             return False
 
     @objc.python_method
-    def _pref_color(self, key: str, fallback: tuple) -> object:
+    def _pref_color(self, key: str) -> object:
         """Build an NSColor from the (device-RGB) color stored under ``key``."""
-        rgba = context_prefs.decode_color(Glyphs.defaults[key], fallback)
-        return NSColor.colorWithDeviceRed_green_blue_alpha_(*rgba)
+        return NSColor.colorWithDeviceRed_green_blue_alpha_(*context_board.color(key))
 
     @objc.python_method
     def _sibling_colors(self, solid: bool) -> tuple[object, object]:
@@ -308,15 +304,13 @@ class AZContextReporter(ReporterPlugin):
         if solid:
             fill = NSColor.colorWithCalibratedRed_green_blue_alpha_(*PREVIEW_FILL_RGBA)
             return fill, fill
-        fill = self._pref_color(context_prefs.FILL_COLOR_KEY, context_prefs.DEFAULT_FILL_RGBA)
-        stroke = self._pref_color(context_prefs.STROKE_COLOR_KEY, context_prefs.DEFAULT_STROKE_RGBA)
+        fill = self._pref_color(context_board.FILL_COLOR_KEY)
+        stroke = self._pref_color(context_board.STROKE_COLOR_KEY)
         return fill, stroke
 
     @objc.python_method
     def _show_guides(self) -> bool:
-        return context_prefs.decode_bool(
-            Glyphs.defaults[context_prefs.SHOW_GUIDES_KEY], context_prefs.DEFAULT_SHOW_GUIDES
-        )
+        return bool(Glyphs.defaults[context_board.SHOW_GUIDES_KEY])
 
     @objc.python_method
     def _labels_fit_zoom(self, upm: float) -> bool:
@@ -354,9 +348,7 @@ class AZContextReporter(ReporterPlugin):
                 metrics.append(float(getattr(master, attr)))
             except Exception:
                 continue
-        color = self._pref_color(
-            context_prefs.STROKE_COLOR_KEY, context_prefs.DEFAULT_STROKE_RGBA
-        ).colorWithAlphaComponent_(0.3)
+        color = self._pref_color(context_board.STROKE_COLOR_KEY).colorWithAlphaComponent_(0.3)
         color.set()
         line_width = STROKE_WIDTH / self._view_scale()  # fixed on-screen weight at any zoom
         for y in metrics:
@@ -368,10 +360,7 @@ class AZContextReporter(ReporterPlugin):
 
     @objc.python_method
     def _show_measurements(self) -> bool:
-        return context_prefs.decode_bool(
-            Glyphs.defaults[context_prefs.SHOW_MEASUREMENTS_KEY],
-            context_prefs.DEFAULT_SHOW_MEASUREMENTS,
-        )
+        return bool(Glyphs.defaults[context_board.SHOW_MEASUREMENTS_KEY])
 
     @objc.python_method
     def _draw_glyph_mode(
@@ -503,9 +492,7 @@ class AZContextReporter(ReporterPlugin):
         means vertical-metric drift on that master."""
         if not entries:
             return
-        base_color = self._pref_color(
-            context_prefs.STROKE_COLOR_KEY, context_prefs.DEFAULT_STROKE_RGBA
-        )
+        base_color = self._pref_color(context_board.STROKE_COLOR_KEY)
         line_color = base_color.colorWithAlphaComponent_(0.5)
         show_labels = self._labels_fit_zoom(upm)
         attributes = {
