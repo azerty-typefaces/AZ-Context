@@ -1,7 +1,7 @@
 """Board access shared by the reporter and the palette — the Glyphs side.
 
-The pure board model lives in ``context_state`` / ``context_store``; this module
-wires it to Glyphs: per-font userData over the global default, the typed
+The pure board model lives in ``context_state``; this module wires it to
+Glyphs: one board in Glyphs.defaults shared by every font, the typed
 sibling strings resolved to glyphs, the designspace walk
 (TTL-cached) and repainting the visible edit view.
 The reporter and the palette both import it, so neither reaches into the other.
@@ -9,6 +9,7 @@ The reporter and the palette both import it, so neither reaches into the other.
 
 from __future__ import annotations
 
+import json
 import time
 import traceback
 from typing import Callable
@@ -19,7 +20,8 @@ from GlyphsApp import Glyphs
 
 import context_designspace
 import context_state
-from context_store import BOARD_KEY, BoardStore
+
+BOARD_KEY = "com.hugojourdan.AZContext.board"
 
 _DESIGNSPACE_TTL = 2.0  # seconds; Font Info master edits show on the board <=2 s late
 _designspace_cache: tuple | None = None  # (font key, expiry, result)
@@ -36,38 +38,25 @@ except Exception:
     pass
 
 
-def store_for(font: object) -> BoardStore:
-    """The board store for ``font``: its userData over the global default."""
-    store = BoardStore(
-        defaults_get=lambda: Glyphs.defaults[BOARD_KEY],
-        defaults_set=lambda value: Glyphs.defaults.__setitem__(BOARD_KEY, value),
-        userdata_get=lambda: _userdata_get(font),
-        userdata_set=lambda value: font.userData.__setitem__(BOARD_KEY, value),
-    )
-    store.ensure_global_seed()
-    return store
+def load() -> dict:
+    """The board, shared by every font (normalized; the default if unset).
 
-
-def _userdata_get(font: object) -> object:
+    Stored as a JSON string: Glyphs.defaults is a plist store, which rejects
+    None (an auto axis) and hands back NSDictionary instead of a dict."""
     try:
-        return font.userData[BOARD_KEY]
-    except Exception:
-        return None
-
-
-def load(font: object) -> dict:
-    """The current board for ``font`` (normalized)."""
-    return store_for(font).load()
+        raw = json.loads(Glyphs.defaults[BOARD_KEY])
+    except (TypeError, ValueError):
+        raw = None
+    return context_state.normalize_board(raw)
 
 
 def mutate(font: object, mutator: Callable[[dict], dict | None]) -> None:
-    """Load ``font``'s board, transform it via ``mutator``, save it, repaint."""
+    """Transform the board via ``mutator``, save it, repaint ``font``'s view."""
     if font is None:
         return
-    store = store_for(font)
-    new_board = mutator(store.load())
+    new_board = mutator(load())
     if new_board is not None:
-        store.save_font(new_board)
+        Glyphs.defaults[BOARD_KEY] = json.dumps(context_state.normalize_board(new_board))
     # repaint(), not Glyphs.redraw(): a forced full pass (e.g. right after a
     # modal ends) paints the active layer with a mismatched transform in G4.
     repaint(font)

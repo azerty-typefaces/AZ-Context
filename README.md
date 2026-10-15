@@ -79,7 +79,7 @@ The palette has two text fields, one on each side of the **H** that stands for t
 
 Characters follow the OpenType features switched on in the tab's Features button: with `ss01` on, `a` draws as `a.ss01`; with `case` on, `(` draws as `parenleft.case`. Names typed with `/` are drawn exactly as typed.
 
-Each font remembers its own siblings, saved in the `.glyphs` file. A new font starts from `nH` and `Oo`.
+Your siblings are saved in Glyphs' preferences, so every font you open uses the same ones. They start as `nH` and `Oo`.
 
 ## Axes: the glyph across your masters
 

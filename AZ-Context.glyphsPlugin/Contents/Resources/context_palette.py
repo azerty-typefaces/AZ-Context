@@ -5,7 +5,7 @@ They used to live in the Edit view's context menu; Hugo moved them out
 
 - Custom: two text fields around an "H" marker, ``[ nH ] H [ Oo ]`` — the
   glyphs drawn left and right of the edited one, typed as characters or
-  ``/name`` (Glyphs edit-view syntax), saved per font as you type;
+  ``/name`` (Glyphs edit-view syntax), saved in Glyphs.defaults as you type;
 - Axes: an axis dropdown (a segmented control ran out of room past 4 axes).
 
 Glyphs makes one palette instance per document window; each reads its OWN
@@ -279,7 +279,7 @@ class AZContextPalette(PalettePlugin):
         font = self._font()
         if font is None:
             return
-        board = context_board.load(font)
+        board = context_board.load()
         mode = board.get("mode", "glyphs")
         axes = tuple((axis.axisTag, str(axis.name or axis.axisTag)) for axis in font.axes)
         tags = tuple(tag for tag, _name in axes)

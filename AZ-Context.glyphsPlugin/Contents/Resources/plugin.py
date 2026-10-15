@@ -1,8 +1,8 @@
 """AZ-Context.glyphsPlugin — entry-point GeneralPlugin.
 
 Registers nothing user-facing in v1 beyond importing the reporter (so the
-ReporterPlugin subclass is defined for Glyphs's loader) and seeding the global
-default board when a document opens. All load steps append to
+ReporterPlugin subclass is defined for Glyphs's loader) and registering the
+settings pane. All load steps append to
 ``~/Library/Logs/AZ-Context.log`` because a GeneralPlugin's stdout does not
 reach the Macro panel.
 """
@@ -30,7 +30,6 @@ _log(f"[AZ Context] plugin.py module-load: pid={os.getpid()}")
 
 try:
     import objc
-    from GlyphsApp import DOCUMENTOPENED, Glyphs
     from GlyphsApp.plugins import GeneralPlugin
 
     _log("[AZ Context] imports OK")
@@ -67,11 +66,8 @@ except Exception:
             return  # no name -> no menu item; no view -> never shown
 
 
-from context_store import BOARD_KEY, BoardStore  # noqa: E402
-
-
 class AZContext(GeneralPlugin):
-    """Lifecycle plugin: seeds the global default board on document open."""
+    """Lifecycle plugin: registers the settings pane."""
 
     @objc.python_method
     def settings(self) -> None:
@@ -80,32 +76,12 @@ class AZContext(GeneralPlugin):
     @objc.python_method
     def start(self) -> None:
         try:
-            Glyphs.addCallback(self.documentOpened_, DOCUMENTOPENED)
-            _log("[AZ Context] start: callbacks registered")
-        except Exception:
-            _log("[AZ Context] start FAILED:")
-            _log(traceback.format_exc())
-        try:
             import context_settings
 
             context_settings.register_preferences_pane()
             _log("[AZ Context] settings pane registered")
         except Exception:
             _log("[AZ Context] settings pane FAILED:")
-            _log(traceback.format_exc())
-
-    def documentOpened_(self, notification: object) -> None:
-        """Seed the global default board the first time any document opens."""
-        try:
-            store = BoardStore(
-                defaults_get=lambda: Glyphs.defaults[BOARD_KEY],
-                defaults_set=lambda value: Glyphs.defaults.__setitem__(BOARD_KEY, value),
-                userdata_get=lambda: None,
-                userdata_set=lambda value: None,
-            )
-            store.ensure_global_seed()
-        except Exception:
-            _log("[AZ Context] documentOpened seed FAILED:")
             _log(traceback.format_exc())
 
     @objc.python_method

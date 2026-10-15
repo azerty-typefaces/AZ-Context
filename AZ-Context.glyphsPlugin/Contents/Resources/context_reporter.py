@@ -2,7 +2,7 @@
 
 Draws a single row of curated sibling glyphs beside the live edit glyph, in the
 current master. This file holds the Glyphs/AppKit bridge; the board model and
-persistence live in the pure modules ``context_state`` / ``context_store``.
+persistence live in ``context_state`` / ``context_board``.
 """
 
 from __future__ import annotations
@@ -263,7 +263,7 @@ class AZContextReporter(ReporterPlugin):
         except Exception:
             return
 
-        board = context_board.load(font)
+        board = context_board.load()
         features = context_board.tab_features(tab)
         solid = self._hand_tool_active()
         mode = board.get("mode")
