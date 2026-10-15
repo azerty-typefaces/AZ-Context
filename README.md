@@ -41,7 +41,7 @@ Open a single glyph and AZ Context draws the glyphs you chose around it, on the 
 - **Your siblings, your way.** Type plain characters, or `/name` for glyphs without a Unicode value, like `/h.sc`.
 - **It reads your features.** Turn on `ss01` in the tab's Features button and the siblings switch to their stylistic alternates too.
 - **See the whole axis.** Axes mode draws the glyph you edit in every master along an axis, so a weight or width jump shows while you draw, not at export.
-- **Stays out of the way.** Siblings are faint outlines, single clicks stay Glyphs' own, and switching to the Hand tool turns the row into a clean preview.
+- **Stays out of the way.** Siblings are faint, display-only outlines that never catch a click, and switching to the Hand tool turns the row into a clean preview.
 
 <br>
 
@@ -96,17 +96,6 @@ Only masters that share every other axis value are drawn, so the row is one clea
 When a master's x-height or cap height differs from the current one, a short tick and its value mark it on that master's column. The values hide when you zoom far out.
 
 Axes needs a font with at least two masters on an axis; otherwise its button is greyed out.
-
-<br>
-
-## On EditView
-
-| Action | Does |
-| --- | --- |
-| Double-click a sibling | Opens it: it becomes the glyph you edit, and the row re-centres on it |
-| Double-click a master in Axes mode | Switches the Edit view to that master |
-
-Single clicks and drags are left to Glyphs, so you can still start a selection right next to the glyph. Right-click shows Glyphs' usual menu.
 
 <br>
 

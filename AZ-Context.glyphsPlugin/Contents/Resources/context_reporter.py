@@ -29,16 +29,12 @@ from AppKit import (  # noqa: E402
     NSInsetRect,
     NSIntersectsRect,
     NSMakePoint,
-    NSMakeRect,
-    NSPointInRect,
-    NSUnionRect,
 )
 
 from Quartz import CGContextGetClipBoundingBox  # noqa: E402
 
 import context_board  # noqa: E402
 import context_designspace  # noqa: E402
-import context_menu_swizzle  # noqa: E402
 import context_prefs  # noqa: E402
 
 try:
@@ -70,30 +66,12 @@ class AZContextReporter(ReporterPlugin):
         self.menuName = "AZ Context"
         self._measure_pairs = []
         self._row_x_spans = []
-        self._ghost_rects = []  # (rect, name, kind) per drawn column: double-click targets
         self._measure_layer_cache = {}  # (glyph name, master id) -> (change token, layer)
 
     @objc.python_method
     def _enabled(self) -> bool:
         value = Glyphs.defaults[ENABLED_KEY]
         return True if value is None else bool(value)
-
-    @objc.python_method
-    def _reporter_visible(self) -> bool:
-        """True while this reporter is switched on in Glyphs' View menu.
-
-        Glyphs simply STOPS calling background()/foreground() when a reporter is
-        turned off — there is no deactivate hook to clear state in — so the last
-        drawn frame's ``_ghost_rects`` would otherwise stay live as click
-        zones forever. ``Glyphs.activeReporters`` is the live set Glyphs walks
-        when it builds the context menu (public API, G3 and G4). NOT the
-        ``visibleReporters`` default: Glyphs 4 build 4106 moved that list to
-        ``GSVisibleReporters`` and left the old key stale, which made this gate
-        silently reject every click."""
-        try:
-            return self in Glyphs.activeReporters
-        except Exception:
-            return True  # unreadable: keep the columns clickable
 
     @objc.python_method
     def _layer_for(self, master: object, glyph_name: str) -> object:
@@ -244,10 +222,6 @@ class AZContextReporter(ReporterPlugin):
             self._draw(layer)
         except Exception:
             traceback.print_exc()
-        try:
-            self._install_menu_swizzle()
-        except Exception:
-            traceback.print_exc()
 
     @objc.python_method
     def inactiveLayerBackground(self, layer: object) -> None:
@@ -269,30 +243,11 @@ class AZContextReporter(ReporterPlugin):
             return False
 
     @objc.python_method
-    def _install_menu_swizzle(self) -> None:
-        """Install the edit-view event swizzle once a live edit view exists (for
-        the column double-click; the AZ Context menu uses the reporter's own
-        addMenuItemsForEvent:toMenu: hook, not the swizzle)."""
-        if context_menu_swizzle.is_installed():
-            return
-        try:
-            view = self.controller.graphicView()
-        except Exception:
-            return
-        if view is None:
-            return
-        context_menu_swizzle.set_mouse_handler(self._handle_ghost_click)
-        context_menu_swizzle.install(view)
-
-    @objc.python_method
     def _draw(self, layer: object) -> None:
-        # Clear BEFORE the early-outs: the click gate trusts these rects
-        # without re-deriving the tab state (Glyphs.font walks the documents,
-        # ~0.6 ms), so a frame that draws no board must leave no stale
-        # hit-zones behind.
+        # Clear BEFORE the early-outs: a frame that draws no board must leave
+        # no stale guide spans or measurements behind.
         self._measure_pairs = []
         self._row_x_spans = []
-        self._ghost_rects = []
         if not self._enabled():
             return
         glyph = layer.parent
@@ -317,8 +272,7 @@ class AZContextReporter(ReporterPlugin):
         else:
             self._draw_glyph_mode(font, glyph, board, solid, features)
         # With the Hand tool the board is a clean preview, so drop the editing
-        # overlays (metric guides, measurements; click targets are gated in the
-        # draw modes above).
+        # overlays (metric guides, measurements).
         if not solid:
             # ponytail: guides draw over the silhouettes (spans filled during the
             # sibling draw above); faint 0.3-alpha lines, so the overlap is hidden.
@@ -380,63 +334,6 @@ class AZContextReporter(ReporterPlugin):
             return NSFont.monospacedSystemFontOfSize_weight_(size, 0.0)
         except Exception:
             return NSFont.userFixedPitchFontOfSize_(size) or NSFont.labelFontOfSize_(size)
-
-    @objc.python_method
-    def _ghost_at_view(self, view: object, event: object) -> tuple[str, str] | None:
-        """Map a click in ``view`` to the (name, kind) of the drawn column under it."""
-        try:
-            point = view.convertPoint_fromView_(event.locationInWindow(), None)
-            active = view.activePosition()
-            scale = float(view.scale()) or 1.0
-            glyph_point = NSMakePoint((point.x - active.x) / scale, (point.y - active.y) / scale)
-        except Exception:
-            traceback.print_exc()
-            return None
-        for rect, name, kind in getattr(self, "_ghost_rects", []):
-            try:
-                if NSPointInRect(glyph_point, rect):
-                    return name, kind
-            except Exception:
-                continue
-        return None
-
-    @objc.python_method
-    def _gated_ghost_hit(self, view: object, event: object) -> tuple[str, str] | None:
-        """(name, kind) of the column under ``event`` — None unless columns were
-        drawn on the latest frame. ``_draw`` clears the rects on every frame
-        including its early-outs, so non-empty rects == live single-glyph board;
-        no Glyphs.font / currentTab re-check needed here. The one case the rects
-        can outlive the board is the reporter being switched off (no further
-        frame runs to clear them), hence the visibility check."""
-        if not getattr(self, "_ghost_rects", None) or not self._enabled():
-            return None
-        if not self._reporter_visible():
-            self._ghost_rects = []
-            return None
-        return self._ghost_at_view(view, event)
-
-    @objc.python_method
-    def _handle_ghost_click(self, view: object, event: object) -> bool:
-        """Left-click handler for the swizzle. A DOUBLE-click on a drawn column
-        opens it: a sibling becomes the edit glyph (the board re-centers), a
-        Variants column switches the edit view to that master. Single clicks
-        stay Glyphs' own, so a marquee can still start beside the glyph."""
-        try:
-            if event.clickCount() < 2:
-                return False
-        except Exception:
-            return False
-        hit = self._gated_ghost_hit(view, event)
-        if hit is None:
-            return False
-        name, kind = hit
-        selector = "azContextSwitchMaster:" if kind == "master" else "azContextFocusGlyph:"
-        # Deferred out of mouseDown: (re-entrancy caution).
-        try:
-            self.performSelector_withObject_afterDelay_(selector, name, 0.0)
-        except Exception:
-            traceback.print_exc()
-        return True
 
     @objc.python_method
     def _render_guides(self, font: object) -> None:
@@ -509,8 +406,6 @@ class AZContextReporter(ReporterPlugin):
             cursor -= GAP
 
         fill, stroke = self._sibling_colors(solid)
-        # No name pills (Hugo 2026-10-11): double-click a sibling column to make
-        # it the edit glyph (see _register_ghost).
         scale = self._view_scale()
 
         for i, glyph_name in enumerate(columns):
@@ -524,35 +419,9 @@ class AZContextReporter(ReporterPlugin):
                 continue
             self._fill_stroke(path, fill, stroke, scale)
             advance = self._advance(current_master, glyph_name, upm * 0.5)
-            if not solid:
-                self._register_ghost(
-                    path, x_positions[i], advance, current_master, glyph_name, "glyph"
-                )
             self._row_x_spans.append((x_positions[i], advance))
             measure_layer = self._measure_layer(current_master, glyph_name)
             self._measure_pairs.append((measure_layer, x_positions[i]))
-
-    @objc.python_method
-    def _register_ghost(
-        self,
-        path: object,
-        x: float,
-        width: float,
-        master: object,
-        name: str,
-        kind: str,
-    ) -> None:
-        """Remember a drawn column as a double-click target (opens it): one
-        advance wide, descender to ascender, widened to the outline's bbox
-        where ink overshoots — so a Hairline stem is as easy to hit as a Black
-        one."""
-        try:
-            bottom = float(master.descender)
-            top = float(master.ascender)
-            rect = NSUnionRect(NSMakeRect(x, bottom, width, top - bottom), path.bounds())
-        except Exception:
-            return
-        self._ghost_rects.append((rect, str(name), kind))
 
     @objc.python_method
     def _draw_axis_mode(self, font: object, glyph: object, board: dict, solid: bool) -> None:
@@ -568,8 +437,6 @@ class AZContextReporter(ReporterPlugin):
         fill, stroke = self._sibling_colors(solid)
         active_width = self._advance(current_master, active_name, upm * 0.5)
         self._row_x_spans.append((0.0, active_width))
-        # No name pills in Variants (Hugo 2026-10-11): double-click a variant
-        # column to switch to that master (see _register_ghost).
         scale = self._view_scale()
         # Per-variant metric ticks: (master, x, width) of every drawn column.
         tick_entries: list[tuple] = []
@@ -600,8 +467,6 @@ class AZContextReporter(ReporterPlugin):
                     measure_layer = self._measure_layer(master, active_name)
                     self._measure_pairs.append((measure_layer, cursor))
                     tick_entries.append((master, cursor, width))
-                    if not solid:
-                        self._register_ghost(path, cursor, width, master, ordered[index], "master")
             cursor += width + GAP
 
         # Lower axis value (lighter / narrower) to the left.
@@ -619,8 +484,6 @@ class AZContextReporter(ReporterPlugin):
                     measure_layer = self._measure_layer(master, active_name)
                     self._measure_pairs.append((measure_layer, cursor))
                     tick_entries.append((master, cursor, width))
-                    if not solid:
-                        self._register_ghost(path, cursor, width, master, ordered[index], "master")
             cursor -= GAP
 
         if not solid and self._show_guides():
@@ -679,8 +542,7 @@ class AZContextReporter(ReporterPlugin):
         if _smart_ruler_bridge is None:
             return False
         try:
-            # Live list, not the ``visibleReporters`` default (stale on G4 4106,
-            # see _reporter_visible).
+            # Live list, not the ``visibleReporters`` default (stale on G4 4106).
             visible = [type(reporter).__name__ for reporter in Glyphs.activeReporters]
         except Exception:
             visible = None
@@ -750,39 +612,6 @@ class AZContextReporter(ReporterPlugin):
     # ------------------------------------------------------------------ #
     # ObjC action selectors (NO @objc.python_method)                     #
     # ------------------------------------------------------------------ #
-
-    def azContextSwitchMaster_(self, name: object) -> None:
-        """Deferred from a Variants column double-click: activate that master."""
-        try:
-            font = Glyphs.font
-            if font is None:
-                return
-            target = str(name)
-            for index, master in enumerate(font.masters):
-                if master.name == target:
-                    font.masterIndex = index
-                    break
-        except Exception:
-            traceback.print_exc()
-
-    def azContextFocusGlyph_(self, name: object) -> None:
-        """Deferred from a sibling column double-click: make that glyph the edit
-        glyph — the board re-centers around it."""
-        try:
-            font = Glyphs.font
-            if font is None:
-                return
-            glyph = font.glyphs[str(name)]
-            tab = font.currentTab
-            if glyph is None or tab is None:
-                return
-            layer = glyph.layers[font.selectedFontMaster.id]
-            try:
-                tab.layers = [layer]
-            except Exception:
-                tab.text = "/" + str(name)  # fallback; layers setter is the state-preserving path
-        except Exception:
-            traceback.print_exc()
 
     def toggleEnabled_(self, sender: object) -> None:
         try:
