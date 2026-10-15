@@ -5,7 +5,7 @@ They used to live in the Edit view's context menu; Hugo moved them out
 
 - Custom: two text fields around an "H" marker, ``[ nH ] H [ Oo ]`` — the
   glyphs drawn left and right of the edited one, typed as characters or
-  ``/name`` (Glyphs edit-view syntax), saved per font as you type;
+  ``/name`` (Glyphs edit-view syntax), saved in Glyphs.defaults as you type;
 - Axes: an axis dropdown (a segmented control ran out of room past 4 axes).
 
 Glyphs makes one palette instance per document window; each reads its OWN
@@ -41,7 +41,6 @@ from GlyphsApp import UPDATEINTERFACE, Glyphs
 from GlyphsApp.plugins import PalettePlugin
 
 import context_board
-import context_state
 
 MODES: tuple[tuple[str, str], ...] = (
     ("glyphs", "Custom"),  # labels renamed by Hugo 2026-10-11; keys stay (stored boards)
@@ -117,7 +116,7 @@ class AZContextPalette(PalettePlugin):
             NSFont.smallSystemFontSize(), NSFontWeightRegular
         )
         self._fields = {}
-        for side in context_state.SIDES:
+        for side in context_board.SIDES:
             field = NSTextField.alloc().init()
             field.setControlSize_(NSControlSizeSmall)
             field.setFont_(mono)
@@ -279,7 +278,7 @@ class AZContextPalette(PalettePlugin):
         font = self._font()
         if font is None:
             return
-        board = context_board.load(font)
+        board = context_board.load()
         mode = board.get("mode", "glyphs")
         axes = tuple((axis.axisTag, str(axis.name or axis.axisTag)) for axis in font.axes)
         tags = tuple(tag for tag, _name in axes)
@@ -303,7 +302,7 @@ class AZContextPalette(PalettePlugin):
         self._mode_seg.setToolTip_forSegment_(
             None if variants_ok else VARIANTS_TIP, VARIANTS_SEGMENT
         )
-        for side, text in zip(context_state.SIDES, texts):
+        for side, text in zip(context_board.SIDES, texts):
             field = self._fields[side]
             if field.currentEditor() is None:  # never rewrite a field mid-typing
                 field.setStringValue_(text)
@@ -328,7 +327,7 @@ class AZContextPalette(PalettePlugin):
         try:
             index = int(sender.selectedSegment())
             mode = MODES[index][0] if 0 <= index < len(MODES) else "glyphs"
-            context_board.mutate(self._font(), lambda board: context_state.set_mode(board, mode))
+            context_board.mutate(self._font(), lambda board: {**board, "mode": mode})
             self._sync(force=True)
         except Exception:
             traceback.print_exc()
@@ -362,7 +361,7 @@ class AZContextPalette(PalettePlugin):
             tags = [tag for tag, _name in self._axis_items or ()]
             if 0 <= index < len(tags):
                 tag = tags[index]
-                context_board.mutate(self._font(), lambda board: context_state.set_axis(board, tag))
+                context_board.mutate(self._font(), lambda board: {**board, "axis": tag})
             self._sync(force=True)
         except Exception:
             traceback.print_exc()

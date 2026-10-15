@@ -1,14 +1,18 @@
-"""Board access shared by the reporter and the palette — the Glyphs side.
+"""The board, shared by the reporter and the palette.
 
-The pure board model lives in ``context_state`` / ``context_store``; this module
-wires it to Glyphs: per-font userData over the global default, the typed
-sibling strings resolved to glyphs, the designspace walk
-(TTL-cached) and repainting the visible edit view.
-The reporter and the palette both import it, so neither reaches into the other.
+A board is ``{"left": str, "right": str, "axis": str | None, "mode": str}``:
+the sibling strings typed in the palette (characters, plus ``/name`` for
+glyphs without a Unicode value; a space or the next ``/`` ends the name, as in
+Glyphs' edit view), the Axes-mode axis tag (None = auto) and the mode
+(``"glyphs"`` = Custom, ``"axis"`` = Axes). One board in Glyphs.defaults is
+shared by every font. This module also resolves the typed strings to glyphs,
+walks the designspace (TTL-cached) and repaints the visible edit view. The
+reporter and the palette both import it, so neither reaches into the other.
 """
 
 from __future__ import annotations
 
+import json
 import time
 import traceback
 from typing import Callable
@@ -17,9 +21,40 @@ import objc
 from Foundation import NSAttributedString
 from GlyphsApp import Glyphs
 
-import context_designspace
-import context_state
-from context_store import BOARD_KEY, BoardStore
+BOARD_KEY = "com.hugojourdan.AZContext.board"
+SIDES: tuple[str, ...] = ("left", "right")
+VALID_MODES: tuple[str, ...] = ("glyphs", "axis")
+SLANT_AXIS_TAGS = ("slnt", "ital")
+
+# Display settings, written by the Settings pane, read by the reporter.
+FILL_COLOR_KEY = "com.hugojourdan.AZContext.fillColor"
+STROKE_COLOR_KEY = "com.hugojourdan.AZContext.strokeColor"
+SHOW_GUIDES_KEY = "com.hugojourdan.AZContext.showGuides"
+SHOW_MEASUREMENTS_KEY = "com.hugojourdan.AZContext.showMeasurements"
+_DEFAULT_COLORS = {
+    FILL_COLOR_KEY: (0.55, 0.35, 0.85, 0.14),
+    STROKE_COLOR_KEY: (0.42, 0.22, 0.70, 0.55),
+}
+# Colours are JSON "[r, g, b, a]" strings, like the board. Registered defaults
+# answer Glyphs.defaults[key] until the user changes a setting.
+for _key, _rgba in _DEFAULT_COLORS.items():
+    Glyphs.registerDefault(_key, json.dumps(_rgba))
+Glyphs.registerDefault(SHOW_GUIDES_KEY, False)
+Glyphs.registerDefault(SHOW_MEASUREMENTS_KEY, True)
+
+
+def color(key: str) -> tuple[float, ...]:
+    """The (r, g, b, a) colour stored under ``key``; the default if malformed."""
+    try:
+        rgba = tuple(float(value) for value in json.loads(Glyphs.defaults[key]))
+    except (TypeError, ValueError):
+        rgba = ()
+    return rgba if len(rgba) == 4 else _DEFAULT_COLORS[key]
+
+
+def set_color(key: str, rgba: tuple[float, ...]) -> None:
+    Glyphs.defaults[key] = json.dumps([float(value) for value in rgba])
+
 
 _DESIGNSPACE_TTL = 2.0  # seconds; Font Info master edits show on the board <=2 s late
 _designspace_cache: tuple | None = None  # (font key, expiry, result)
@@ -36,38 +71,63 @@ except Exception:
     pass
 
 
-def store_for(font: object) -> BoardStore:
-    """The board store for ``font``: its userData over the global default."""
-    store = BoardStore(
-        defaults_get=lambda: Glyphs.defaults[BOARD_KEY],
-        defaults_set=lambda value: Glyphs.defaults.__setitem__(BOARD_KEY, value),
-        userdata_get=lambda: _userdata_get(font),
-        userdata_set=lambda value: font.userData.__setitem__(BOARD_KEY, value),
-    )
-    store.ensure_global_seed()
-    return store
+def default_board() -> dict:
+    return {"left": "nH", "right": "Oo", "axis": None, "mode": "glyphs"}
 
 
-def _userdata_get(font: object) -> object:
+def normalize_board(raw: object) -> dict:
+    """Keep each valid field of a stored board; the default fills the rest."""
+    board = default_board()
+    if isinstance(raw, dict):
+        for side in SIDES:
+            if isinstance(raw.get(side), str):
+                board[side] = raw[side]
+        if isinstance(raw.get("axis"), str) and raw["axis"]:
+            board["axis"] = raw["axis"]
+        if raw.get("mode") in VALID_MODES:
+            board["mode"] = raw["mode"]
+    return board
+
+
+def tokens(text: str) -> list[str]:
+    """Split a sibling string into tokens: single characters or ``/name``.
+    Whitespace is not a sibling (type ``/space`` for the space glyph)."""
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        if text[i] == "/":
+            end = i + 1
+            while end < len(text) and text[end] not in "/ ":
+                end += 1
+            if end > i + 1:
+                out.append(text[i:end])
+            i = end + 1 if end < len(text) and text[end] == " " else end
+            continue
+        if not text[i].isspace():
+            out.append(text[i])
+        i += 1
+    return out
+
+
+def load() -> dict:
+    """The board, shared by every font (normalized; the default if unset).
+
+    Stored as a JSON string: Glyphs.defaults is a plist store, which rejects
+    None (an auto axis) and hands back NSDictionary instead of a dict."""
     try:
-        return font.userData[BOARD_KEY]
-    except Exception:
-        return None
-
-
-def load(font: object) -> dict:
-    """The current board for ``font`` (normalized)."""
-    return store_for(font).load()
+        raw = json.loads(Glyphs.defaults[BOARD_KEY])
+    except (TypeError, ValueError):
+        raw = None
+    return normalize_board(raw)
 
 
 def mutate(font: object, mutator: Callable[[dict], dict | None]) -> None:
-    """Load ``font``'s board, transform it via ``mutator``, save it, repaint."""
+    """Transform the board via ``mutator``, save it, repaint ``font``'s view."""
     if font is None:
         return
-    store = store_for(font)
-    new_board = mutator(store.load())
+    new_board = mutator(load())
     if new_board is not None:
-        store.save_font(new_board)
+        Glyphs.defaults[BOARD_KEY] = json.dumps(normalize_board(new_board))
     # repaint(), not Glyphs.redraw(): a forced full pass (e.g. right after a
     # modal ends) paints the active layer with a mismatched transform in G4.
     repaint(font)
@@ -106,7 +166,7 @@ def _side_names(font: object, text: str, features: tuple[str, ...]) -> list[str]
         names.extend(name for name in shaped if name)
         run.clear()
 
-    for token in context_state.tokens(text):
+    for token in tokens(text):
         if token.startswith("/"):
             flush()
             name = glyph_name(font, token)
@@ -167,7 +227,7 @@ def glyph_name(font: object, token: str) -> str | None:
 
 def set_side_text(font: object, side: str, text: str) -> None:
     """Store what the user typed in the ``side`` palette field."""
-    mutate(font, lambda board: context_state.set_side(board, side, text))
+    mutate(font, lambda board: {**board, side: text})
 
 
 def single_glyph(tab: object) -> object:
@@ -225,6 +285,68 @@ def repaint(font: object = None) -> None:
         traceback.print_exc()
 
 
+def group_masters_by_axis(
+    axes_tags: list[str],
+    master_names: list[str],
+    master_values: dict[str, dict[str, float]],
+    master_italic: dict[str, bool],
+) -> dict[str, list[list[str]]]:
+    """Map each axis tag to a list of master groups.
+
+    A group lists master names (in ``master_names`` order) that share every
+    OTHER axis coordinate. When the axis is not a slant axis, roman and italic
+    masters split into separate groups so each group is a clean 1-D line.
+    """
+    result: dict[str, list[list[str]]] = {}
+    for axis in axes_tags:
+        other_axes = [tag for tag in axes_tags if tag != axis]
+        discriminate_italic = axis not in SLANT_AXIS_TAGS
+        coord_groups: dict[tuple, list[str]] = {}
+        for name in master_names:
+            values = master_values[name]
+            coord_key: tuple = tuple(values[tag] for tag in other_axes)
+            if discriminate_italic:
+                coord_key = coord_key + ("italic" if master_italic.get(name) else "roman",)
+            coord_groups.setdefault(coord_key, []).append(name)
+        result[axis] = list(coord_groups.values())
+    return result
+
+
+def group_for_master(groups: list[list[str]], master_name: str) -> list[str]:
+    """Return the group containing ``master_name`` (``[master_name]`` if none)."""
+    for group in groups:
+        if master_name in group:
+            return group
+    return [master_name]
+
+
+def sort_group_by_axis(
+    group: list[str],
+    axis: str,
+    master_values: dict[str, dict[str, float]],
+) -> list[str]:
+    """Return ``group`` sorted ascending by each master's value on ``axis``."""
+    return sorted(group, key=lambda name: master_values[name][axis])
+
+
+def auto_axis(
+    grouped: dict[str, list[list[str]]],
+    axes_tags: list[str],
+    current_master: str,
+) -> str | None:
+    """Pick the axis whose group containing ``current_master`` has the most
+    masters. Ties break by ``axes_tags`` order. ``None`` when no axis yields
+    more than one master (nothing to compare)."""
+    best_axis: str | None = None
+    best_count = 1
+    for axis in axes_tags:
+        group = group_for_master(grouped.get(axis, []), current_master)
+        if len(group) > best_count:
+            best_count = len(group)
+            best_axis = axis
+    return best_axis
+
+
 def designspace(font: object) -> tuple[list[str], list[str], dict, dict]:
     """(axis tags, master names, master axis values, master italic flags).
 
@@ -272,17 +394,15 @@ def axis_master_order(font: object, board: dict) -> tuple[list[str], int, str | 
     axes_tags, master_names, master_values, master_italic = designspace(font)
     if not axes_tags or len(master_names) < 2:
         return [], 0, None
-    grouped = context_designspace.group_masters_by_axis(
-        axes_tags, master_names, master_values, master_italic
-    )
+    grouped = group_masters_by_axis(axes_tags, master_names, master_values, master_italic)
     current = font.selectedFontMaster.name
     axis = board.get("axis")
     if axis not in axes_tags:
-        axis = context_designspace.auto_axis(grouped, axes_tags, current)
+        axis = auto_axis(grouped, axes_tags, current)
     if axis is None:
         return [], 0, None
-    group = context_designspace.group_for_master(grouped.get(axis, []), current)
-    ordered = context_designspace.sort_group_by_axis(group, axis, master_values)
+    group = group_for_master(grouped.get(axis, []), current)
+    ordered = sort_group_by_axis(group, axis, master_values)
     try:
         current_index = ordered.index(current)
     except ValueError:
