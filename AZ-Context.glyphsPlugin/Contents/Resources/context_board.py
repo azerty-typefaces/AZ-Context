@@ -1,10 +1,13 @@
-"""Board access shared by the reporter and the palette — the Glyphs side.
+"""The board, shared by the reporter and the palette.
 
-The pure board model lives in ``context_state``; this module wires it to
-Glyphs: one board in Glyphs.defaults shared by every font, the typed
-sibling strings resolved to glyphs, the designspace walk
-(TTL-cached) and repainting the visible edit view.
-The reporter and the palette both import it, so neither reaches into the other.
+A board is ``{"left": str, "right": str, "axis": str | None, "mode": str}``:
+the sibling strings typed in the palette (characters, plus ``/name`` for
+glyphs without a Unicode value; a space or the next ``/`` ends the name, as in
+Glyphs' edit view), the Axes-mode axis tag (None = auto) and the mode
+(``"glyphs"`` = Custom, ``"axis"`` = Axes). One board in Glyphs.defaults is
+shared by every font. This module also resolves the typed strings to glyphs,
+walks the designspace (TTL-cached) and repaints the visible edit view. The
+reporter and the palette both import it, so neither reaches into the other.
 """
 
 from __future__ import annotations
@@ -19,9 +22,10 @@ from Foundation import NSAttributedString
 from GlyphsApp import Glyphs
 
 import context_designspace
-import context_state
 
 BOARD_KEY = "com.hugojourdan.AZContext.board"
+SIDES: tuple[str, ...] = ("left", "right")
+VALID_MODES: tuple[str, ...] = ("glyphs", "axis")
 
 _DESIGNSPACE_TTL = 2.0  # seconds; Font Info master edits show on the board <=2 s late
 _designspace_cache: tuple | None = None  # (font key, expiry, result)
@@ -38,6 +42,44 @@ except Exception:
     pass
 
 
+def default_board() -> dict:
+    return {"left": "nH", "right": "Oo", "axis": None, "mode": "glyphs"}
+
+
+def normalize_board(raw: object) -> dict:
+    """Keep each valid field of a stored board; the default fills the rest."""
+    board = default_board()
+    if isinstance(raw, dict):
+        for side in SIDES:
+            if isinstance(raw.get(side), str):
+                board[side] = raw[side]
+        if isinstance(raw.get("axis"), str) and raw["axis"]:
+            board["axis"] = raw["axis"]
+        if raw.get("mode") in VALID_MODES:
+            board["mode"] = raw["mode"]
+    return board
+
+
+def tokens(text: str) -> list[str]:
+    """Split a sibling string into tokens: single characters or ``/name``.
+    Whitespace is not a sibling (type ``/space`` for the space glyph)."""
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        if text[i] == "/":
+            end = i + 1
+            while end < len(text) and text[end] not in "/ ":
+                end += 1
+            if end > i + 1:
+                out.append(text[i:end])
+            i = end + 1 if end < len(text) and text[end] == " " else end
+            continue
+        if not text[i].isspace():
+            out.append(text[i])
+        i += 1
+    return out
+
+
 def load() -> dict:
     """The board, shared by every font (normalized; the default if unset).
 
@@ -47,7 +89,7 @@ def load() -> dict:
         raw = json.loads(Glyphs.defaults[BOARD_KEY])
     except (TypeError, ValueError):
         raw = None
-    return context_state.normalize_board(raw)
+    return normalize_board(raw)
 
 
 def mutate(font: object, mutator: Callable[[dict], dict | None]) -> None:
@@ -56,7 +98,7 @@ def mutate(font: object, mutator: Callable[[dict], dict | None]) -> None:
         return
     new_board = mutator(load())
     if new_board is not None:
-        Glyphs.defaults[BOARD_KEY] = json.dumps(context_state.normalize_board(new_board))
+        Glyphs.defaults[BOARD_KEY] = json.dumps(normalize_board(new_board))
     # repaint(), not Glyphs.redraw(): a forced full pass (e.g. right after a
     # modal ends) paints the active layer with a mismatched transform in G4.
     repaint(font)
@@ -95,7 +137,7 @@ def _side_names(font: object, text: str, features: tuple[str, ...]) -> list[str]
         names.extend(name for name in shaped if name)
         run.clear()
 
-    for token in context_state.tokens(text):
+    for token in tokens(text):
         if token.startswith("/"):
             flush()
             name = glyph_name(font, token)
@@ -156,7 +198,7 @@ def glyph_name(font: object, token: str) -> str | None:
 
 def set_side_text(font: object, side: str, text: str) -> None:
     """Store what the user typed in the ``side`` palette field."""
-    mutate(font, lambda board: context_state.set_side(board, side, text))
+    mutate(font, lambda board: {**board, side: text})
 
 
 def single_glyph(tab: object) -> object:

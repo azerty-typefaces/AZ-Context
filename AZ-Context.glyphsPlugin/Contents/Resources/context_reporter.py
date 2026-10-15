@@ -2,7 +2,7 @@
 
 Draws a single row of curated sibling glyphs beside the live edit glyph, in the
 current master. This file holds the Glyphs/AppKit bridge; the board model and
-persistence live in ``context_state`` / ``context_board``.
+persistence live in ``context_board``.
 """
 
 from __future__ import annotations
