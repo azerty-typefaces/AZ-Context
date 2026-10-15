@@ -51,9 +51,6 @@ STROKE_WIDTH = 1.0
 LABEL_MIN_EM_PT = 300.0
 
 
-ENABLED_KEY = "com.hugojourdan.AZContext.enabled"
-
-
 class AZContextReporter(ReporterPlugin):
     """Draws a glyphs x masters comparison board around a single edit glyph."""
 
@@ -63,11 +60,6 @@ class AZContextReporter(ReporterPlugin):
         self._measure_pairs = []
         self._row_x_spans = []
         self._measure_layer_cache = {}  # (glyph name, master id) -> (change token, layer)
-
-    @objc.python_method
-    def _enabled(self) -> bool:
-        value = Glyphs.defaults[ENABLED_KEY]
-        return True if value is None else bool(value)
 
     @objc.python_method
     def _layer_for(self, master: object, glyph_name: str) -> object:
@@ -244,8 +236,6 @@ class AZContextReporter(ReporterPlugin):
         # no stale guide spans or measurements behind.
         self._measure_pairs = []
         self._row_x_spans = []
-        if not self._enabled():
-            return
         glyph = layer.parent
         if glyph is None:
             return
@@ -598,10 +588,3 @@ class AZContextReporter(ReporterPlugin):
     # ------------------------------------------------------------------ #
     # ObjC action selectors (NO @objc.python_method)                     #
     # ------------------------------------------------------------------ #
-
-    def toggleEnabled_(self, sender: object) -> None:
-        try:
-            Glyphs.defaults[ENABLED_KEY] = not self._enabled()
-            context_board.repaint()
-        except Exception:
-            traceback.print_exc()
