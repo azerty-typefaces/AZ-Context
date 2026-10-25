@@ -277,6 +277,8 @@ if _AVAILABLE:
     # else finds it there. UI: a full-width NSPopUpButton switches between the
     # panes hosted in a tabless NSTabView below it; a pane whose plugin is
     # licensed (bought, not trial) gets an accent-colored 􀇻 after its name.
+    # The hub takes the SELECTED pane's size, not the largest (v1.2): Glyphs'
+    # Settings window follows preferredContentSize live, top edge fixed.
     # Keep the selectors stable across ALL AZ plugins (protocol v1.1):
     #   addSettingsPane:(NSViewController*)  pane.title = the popup item ("AZ X"),
     #                                        pane.representedObject = jump id;
@@ -287,12 +289,32 @@ if _AVAILABLE:
     _HUB_BADGE = "\U001001fb"  # SF Symbol checkmark seal, one astral codepoint
     _POPUP_BAR_H = 41.0  # 10 top + 25 popup + 6 gap
 
+    def _open_settings_on(controller: object) -> None:
+        """Open Glyphs > Settings on a pane added with addViewToPreferences:.
+
+        Glyphs 3 files the pane under its title, Glyphs 4 under its CLASS NAME, and an
+        identifier it does not know raises — so the title is tried first and the
+        class name catches the raise.
+        """
+        delegate = NSApplication.sharedApplication().delegate()
+        if delegate is None or not delegate.respondsToSelector_(
+            b"showMainPreferencesWithIdentifier:"
+        ):
+            return
+        for identifier in (controller.title(), controller.className()):
+            try:
+                delegate.showMainPreferencesWithIdentifier_(identifier)
+                return
+            except Exception:
+                continue
+
     class AZContextToolkitHub(NSViewController):
         def init(self) -> object:
             self = objc.super(AZContextToolkitHub, self).init()
             if self is None:
                 return None
             self._panes = []
+            self._sizes = {}  # tab identifier -> the pane's designed (width, height)
             self.setTitle_(_HUB_TITLE)
             self.setRepresentedObject_(_HUB_TITLE)
             self.setPreferredContentSize_(NSMakeSize(360.0, 240.0))
@@ -318,6 +340,7 @@ if _AVAILABLE:
         def azToolkitPopupChanged_(self, sender: object) -> None:
             try:
                 self._tabs.selectTabViewItemAtIndex_(sender.indexOfSelectedItem())
+                self._fit_selected()
             except Exception:
                 pass
 
@@ -353,6 +376,7 @@ if _AVAILABLE:
                 view = pane.view()
                 if size.width < 1 or size.height < 1:
                     size = view.frame().size
+                self._sizes[str(ident)] = (float(size.width), float(size.height))
                 # Pin the pane at its designed size, top-left; the flexible
                 # right/bottom margins absorb the stretch NSTabView applies.
                 container = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, size.width, size.height))
@@ -380,7 +404,7 @@ if _AVAILABLE:
                     self._popup.itemAtIndex_(insert_at).setAttributedTitle_(text)
                 self._panes.append(pane)  # retain: AppKit must not dealloc it
                 self._popup.selectItemAtIndex_(tabs.indexOfTabViewItem_(tabs.selectedTabViewItem()))
-                self._recalc_preferred_size()
+                self._fit_selected()
             except Exception:
                 traceback.print_exc()
 
@@ -449,28 +473,26 @@ if _AVAILABLE:
                         tabs.selectTabViewItemAtIndex_(index)
                         self._popup.selectItemAtIndex_(index)
                         break
+                self._fit_selected()
             except Exception:
                 pass
             try:
-                delegate = NSApplication.sharedApplication().delegate()
-                if delegate is not None and delegate.respondsToSelector_(
-                    b"showMainPreferencesWithIdentifier:"
-                ):
-                    delegate.showMainPreferencesWithIdentifier_(_HUB_TITLE)
+                _open_settings_on(self)
             except Exception:
                 pass
 
         @objc.python_method
-        def _recalc_preferred_size(self) -> None:
+        def _fit_selected(self) -> None:
+            """Size the hub to the selected pane (v1.2). AppKit pins the hub's view to
+            preferredContentSize, so a shown Settings window resizes with it."""
             try:
-                max_width, max_height = 300.0, 200.0
-                for pane in self._panes:
-                    size = pane.preferredContentSize()
-                    if size.width < 1 or size.height < 1:
-                        size = pane.view().frame().size
-                    max_width = max(max_width, size.width)
-                    max_height = max(max_height, size.height)
-                self.setPreferredContentSize_(NSMakeSize(max_width, max_height + _POPUP_BAR_H))
+                item = self._tabs.selectedTabViewItem()
+                if item is None:
+                    return
+                width, height = self._sizes.get(str(item.identifier()), (300.0, 200.0))
+                self.setPreferredContentSize_(
+                    NSMakeSize(max(300.0, width), max(200.0, height) + _POPUP_BAR_H)
+                )
             except Exception:
                 traceback.print_exc()
 
