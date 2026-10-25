@@ -289,6 +289,25 @@ if _AVAILABLE:
     _HUB_BADGE = "\U001001fb"  # SF Symbol checkmark seal, one astral codepoint
     _POPUP_BAR_H = 41.0  # 10 top + 25 popup + 6 gap
 
+    def _open_settings_on(controller: object) -> None:
+        """Open Glyphs > Settings on a pane added with addViewToPreferences:.
+
+        Glyphs 3 files the pane under its title, Glyphs 4 under its CLASS NAME, and an
+        identifier it does not know raises — so the title is tried first and the
+        class name catches the raise.
+        """
+        delegate = NSApplication.sharedApplication().delegate()
+        if delegate is None or not delegate.respondsToSelector_(
+            b"showMainPreferencesWithIdentifier:"
+        ):
+            return
+        for identifier in (controller.title(), controller.className()):
+            try:
+                delegate.showMainPreferencesWithIdentifier_(identifier)
+                return
+            except Exception:
+                continue
+
     class AZContextToolkitHub(NSViewController):
         def init(self) -> object:
             self = objc.super(AZContextToolkitHub, self).init()
@@ -458,11 +477,7 @@ if _AVAILABLE:
             except Exception:
                 pass
             try:
-                delegate = NSApplication.sharedApplication().delegate()
-                if delegate is not None and delegate.respondsToSelector_(
-                    b"showMainPreferencesWithIdentifier:"
-                ):
-                    delegate.showMainPreferencesWithIdentifier_(_HUB_TITLE)
+                _open_settings_on(self)
             except Exception:
                 pass
 
