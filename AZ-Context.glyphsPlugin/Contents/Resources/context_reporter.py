@@ -254,15 +254,19 @@ class AZContextReporter(ReporterPlugin):
         solid = self._hand_tool_active()
         mode = board.get("mode")
         if mode == "axis":
+            master = font.selectedFontMaster
             self._draw_axis_mode(font, glyph, board, solid)
         else:
-            self._draw_glyph_mode(font, glyph, board, solid, features)
+            # Custom follows the focus layer's master, not the toolbar's: picking
+            # another master's layer in the Layers panel keeps selectedFontMaster.
+            master = layer.master or font.selectedFontMaster
+            self._draw_glyph_mode(font, glyph, master, board, solid, features)
         # With the Hand tool the board is a clean preview, so drop the editing
         # overlays (metric guides, measurements).
         if not solid:
             # ponytail: guides draw over the silhouettes (spans filled during the
             # sibling draw above); faint 0.3-alpha lines, so the overlap is hidden.
-            self._render_guides(font)
+            self._render_guides(master)
         if not solid:
             self._render_measurements(font)
 
@@ -319,14 +323,13 @@ class AZContextReporter(ReporterPlugin):
             return NSFont.userFixedPitchFontOfSize_(size) or NSFont.labelFontOfSize_(size)
 
     @objc.python_method
-    def _render_guides(self, font: object) -> None:
-        """Current master's metric lines (baseline, x-height, cap, asc, desc)
+    def _render_guides(self, master: object) -> None:
+        """``master``'s metric lines (baseline, x-height, cap, asc, desc)
         spanning the sibling row, so cross-sibling vertical alignment is visible.
         Glyphs already draws these full-width for the active master; the value
         here is the explicit row span (and a reference grid in Variants mode)."""
         if not self._show_guides() or not self._row_x_spans:
             return
-        master = font.selectedFontMaster
         if master is None:
             return
         x0 = min(x for x, _w in self._row_x_spans)
@@ -356,17 +359,17 @@ class AZContextReporter(ReporterPlugin):
         self,
         font: object,
         glyph: object,
+        current_master: object,
         board: dict,
         solid: bool,
         features: tuple[str, ...] = (),
     ) -> None:
         """The sibling strings typed in the palette, left and right of the live
-        glyph, in the current master, with the tab's active OpenType features
-        applied (ss01 on: a -> a.ss01). A typed copy of the edited glyph is
-        drawn too (HH|H|HH is a spacing check)."""
+        glyph, in the focus layer's master, with the tab's active OpenType
+        features applied (ss01 on: a -> a.ss01). A typed copy of the edited
+        glyph is drawn too (HH|H|HH is a spacing check)."""
         active_name = glyph.name
         columns, active_index = context_board.sibling_row(font, active_name, board, features)
-        current_master = font.selectedFontMaster
         upm = float(font.upm or 1000)
 
         # x positions in glyph units, anchored so the active glyph sits at x=0.
